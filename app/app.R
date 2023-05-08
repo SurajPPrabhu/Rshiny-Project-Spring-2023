@@ -4,12 +4,18 @@ library(tidyverse)
 library(scales)
 library(gplots)
 library(RColorBrewer)
+library(shinyWidgets)
+library(colourpicker)
+library(gridExtra)
+library(glue)
+library(shinythemes)
 
 #defining the layout and sidebars
 sidebar <- dashboardSidebar(
   sidebarMenu(
     menuItem("Sample Information Exploration", tabName = "data"),
-    menuItem("Counts", tabName = "counts")
+    menuItem("Counts", tabName = "counts"),
+    menuItem("Differential Expression", tabName ="diffexp" )
   )
 )
 
@@ -42,11 +48,30 @@ body <- dashboardBody(
               ),
               uiOutput("counts_tabs")
             )
+    ),
+    tabItem(tabName = "diffexp", 
+            sidebarLayout(
+              sidebarPanel(
+                fileInput(inputId = "file3","Load differential expression results:", placeholder = "deseq_res.csv", accept = ".csv"), 
+                radioButtons(inputId = "x_var", "Choose the column for x-axis", choices=c("baseMean","log2FoldChange", "lfcSE", "stat", "pvalue", "padj")),
+                radioButtons(inputId = "y_var", "Choose the column for y-axis", choices=c("baseMean","log2FoldChange", "lfcSE", "stat", "pvalue", "padj")),
+                colourInput(inputId = "color1", "Select base point color", value = "midnightblue", showColour = c("both", "text", "background"),
+                            palette = c("square", "limited"), allowedCols = NULL, allowTransparent = FALSE, returnName = FALSE, closeOnClick = FALSE),
+                colourInput(inputId = "color2", "Highlight point color", value = "springgreen", showColour = c("both", "text", "background"), 
+                            palette = c("square", "limited"), allowedCols = NULL, allowTransparent = FALSE, returnName = FALSE, closeOnClick = FALSE),
+                sliderInput(inputId = "slider_value", "Select the magnitude of the p adjusted coloring:", min = -100, max = 0, value = -50),
+                actionButton("plot", "Submit")
+              ),
+              mainPanel(
+                h3("Differential Expression Analysis"),
+                p("Load differential expression analysis results for visualization.")
+              )
+            ),uiOutput("diff_exp")
     )
-  )
-)
-
-
+    
+    )
+    
+    )
 
 #defining server side functions
 server <- function(input, output) {
@@ -70,7 +95,13 @@ server <- function(input, output) {
       read_csv(input$file2$datapath, col_names = TRUE,)
     }
   })
-  
+  # Function to load data 
+  diff_data <- reactive({
+    if (!is.null(input$file3)){
+      file3 <- read_csv(input$file3$datapath)
+      return(file3)}
+    else{return(NULL)}
+  })
   
   #Define summary tab for the meta data
   meta_summary <- function(data) {
@@ -85,9 +116,27 @@ server <- function(input, output) {
   
   
   # Define summary_data function to process counts data
-  summary_data <- function(data_counts, gvar, nz_genes) {
+  # summary_data <- function(data_counts, gvar, nz_genes) {
+  #   # Filter genes based on variance and number of non-zero samples
+  #   genes_var_filtered <- data_counts[rowSums(data_counts > 0) >= nz_genes & apply(data_counts, 1, var) >= gvar, ]
+  #   
+  #   # Get summary statistics for the filtered data
+  #   num_rows_filtered <- nrow(genes_var_filtered)
+  #   num_rows_not_filtered <- nrow(data_counts) - num_rows_filtered
+  #   pgene <- percent((num_rows_filtered / nrow(data_counts)))
+  #   fgene <- percent((num_rows_not_filtered) / nrow(data_counts))
+  #   
+  #   # Create summary data frame
+  #   summary_df <- data.frame(Description = c("Number of Genes", "Number of Samples", "Number of Genes (Filtered):", "% of genes filtered", "Number of Genes not filtered:", "%genes not filtered:"), Value = c(nrow(data_counts), ncol(data_counts), num_rows_filtered, pgene, num_rows_not_filtered, fgene))
+  #   
+  #   return(summary_df)
+  # }
+  summary_data <- function(data_counts, perc_var, nz_genes) {
+    # Calculate variance percentile threshold
+    var_threshold <- quantile(apply(data_counts, 1, var, na.rm='TRUE'), probs = perc_var/100)
+    
     # Filter genes based on variance and number of non-zero samples
-    genes_var_filtered <- data_counts[rowSums(data_counts > 0) >= nz_genes & apply(data_counts, 1, var) >= gvar, ]
+    genes_var_filtered <- data_counts[rowSums(data_counts > 0) >= nz_genes & apply(data_counts, 1, var) >= var_threshold, ]
     
     # Get summary statistics for the filtered data
     num_rows_filtered <- nrow(genes_var_filtered)
@@ -96,7 +145,7 @@ server <- function(input, output) {
     fgene <- percent((num_rows_not_filtered) / nrow(data_counts))
     
     # Create summary data frame
-    summary_df <- data.frame(Description = c("Number of Genes", "Number of Samples", "Number of Genes (Filtered):", "% of genes filtered", "Number of Genes not filtered:", "%genes not filtered:"), Value = c(nrow(data_counts), ncol(data_counts), num_rows_filtered, pgene, num_rows_not_filtered, fgene))
+    summary_df <- data.frame(Description = c("Number of Genes", "Number of Samples", "Number of Genes (Filtered):", "% of genes filtered", "Number of Genes not filtered:", "%genes not filtered:"), Value = c(nrow(data_counts), ncol(data_counts)-1, num_rows_filtered, pgene, num_rows_not_filtered, fgene))
     
     return(summary_df)
   }
@@ -128,6 +177,16 @@ server <- function(input, output) {
                  selectInput(inputId = "comp2", label="Select Y-axis", choices = c("PC1", "PC2", "PC3", "PC4", "PC5", "PC5", "PC6", "PC7", "PC8", "PC9", "PC10"), selected = "PC2")
                 , plotOutput("plot_pca"))
         )
+    }
+  })
+  
+  output$diff_exp<-renderUI({
+    if (is.null(diff_data())) {
+      return(NULL)
+    } else {tabsetPanel(tabPanel("Table",dataTableOutput("deg_table")),
+                        tabPanel("Volano Plot", plotOutput("volcano")),
+                        tabPanel("Plot Table", dataTableOutput("v_table"))
+    )
     }
   })
   
@@ -216,35 +275,42 @@ server <- function(input, output) {
     return(hmap)
   })
   
+  # Function to calculate PCA and create PCA plot
+  calc_pca_plot <- function(data, gvar, comp1, comp2) {
+    filt_tib <- data %>% 
+      mutate(variance = apply(data[-1], MARGIN = 1, FUN = var), .after = gene) # calculate variance for filtering
+    perc_val <- quantile(filt_tib$variance, probs = gvar/100, na.rm = TRUE)   # calculate percentile
+    filt_tib <- filter(filt_tib, variance >= perc_val) # filter the tibble
+    pca_res <- prcomp(t(filt_tib[-c(1,2)]), scale = FALSE) # transpose the data and perform PCA
+    
+    # extract variance explained by each component
+    var_explained <- summary(pca_res)$importance[2,] * 100
+    
+    # get selected principal components
+    comp1 <- which(colnames(pca_res$x) == comp1)
+    comp2 <- which(colnames(pca_res$x) == comp2)
+    
+    # create PCA plot
+    plot_tib <- tibble(PC1 = pca_res$x[,comp1], PC2=pca_res$x[,comp2])
+    pca_plot <- ggplot(plot_tib, aes(x = PC1, y = PC2)) +
+      geom_point() +
+      labs(title = "Principal Component Analysis Plot",
+           x = paste0(comp1, " (", round(var_explained[comp1], 2), "% variance)"),
+           y = paste0(comp2, " (", round(var_explained[comp2], 2), "% variance)")) +
+      theme_bw()
+    return(pca_plot)
+  }
+  
+  # Output render for PCA plot
   output$plot_pca <- renderPlot({
     if (is.null(data_counts())) {
       return(NULL)
     } else {
-      # calculate PCA
-      filt_tib <- data_counts() %>% 
-        mutate(variance = apply(data_counts()[-1], MARGIN = 1, FUN = var), .after = gene) # calculate variance for filtering
-      perc_val <- quantile(filt_tib$variance, probs = input$gvar/100, na.rm = TRUE)   # calculate percentile
-      filt_tib <- filter(filt_tib, variance >= perc_val) # filter the tibble
-      pca_res <- prcomp(t(filt_tib[-c(1,2)]), scale = FALSE) # transpose the data and perform PCA
-      
-      # extract variance explained by each component
-      var_explained <- summary(pca_res)$importance[2,] * 100
-      
-      # get selected principal components
-      comp1 <- which(colnames(pca_res$x) == input$comp1)
-      comp2 <- which(colnames(pca_res$x) == input$comp2)
-      
-      # create PCA plot
-      plot_tib <- tibble(PC1 = pca_res$x[,comp1], PC2=pca_res$x[,comp2])
-      pca_plot <- ggplot(plot_tib, aes(x = PC1, y = PC2)) +
-        geom_point() +
-        labs(title = "Principal Component Analysis Plot",
-             x = paste0(input$comp1, " (", round(var_explained[comp1], 2), "% variance)"),
-             y = paste0( input$comp2, " (", round(var_explained[comp2], 2), "% variance)")) +
-        theme_bw()
+      pca_plot <- calc_pca_plot(data_counts(), input$gvar, input$comp1, input$comp2)
       return(pca_plot)
     }
   })
+  
   
   observeEvent(input$submit_btn, {
     output$summary_data <- renderDataTable({
@@ -278,6 +344,52 @@ server <- function(input, output) {
     return(plots)
   }
   
+  
+  
+  # Function to plot volcano plot using input filters from sliders 
+  volc_plot<- function(data, x_var, y_var, slider_value, color1, color2) {
+    data_filtered <- data %>% drop_na()
+    volcano <- ggplot(data_filtered, aes(x= !!sym(x_var), y= -log10(!!sym(y_var)), color= color)) + 
+      geom_point(aes(color = if_else(data_filtered[[y_var]] < 10^slider_value, TRUE, FALSE))) +   
+      scale_color_manual(name = glue("{x_var} < 1*10^{slider_value}"),
+                         values = c("FALSE" = color1,
+                                    "TRUE" = color2),
+                         labels = c("FALSE", "TRUE")) + 
+      labs(title = "Volcano Plot", x = x_var, y = y_var) +
+      theme_linedraw() +
+      theme(plot.title = element_text(hjust = 0.5), legend.position = "bottom")
+    return(volcano)
+  }
+  
+  # Function to generate table with data for DEGs filtered in volcano plot 
+  volc_table <- function(file, slider) {
+    # Filter data frame by adjusted p-value threshold
+    new_df <- file[file$padj < 10^slider, ]
+    
+    # Format p-value columns to display more digits
+    new_df$pvalue <- format(new_df$pvalue, digits = 5, scientific = TRUE)
+    new_df$padj <- format(new_df$padj, digits = 5, scientific = TRUE)
+    
+    # Return filtered and formatted data frame
+    return(new_df)
+  }
+  output$deg_table <- renderDataTable({
+  diff_data()
+  }, options = list(scrollX = TRUE))
+  
+  # Add observeEvent for submit button
+  observeEvent(input$plot, {
+    # Generate plot and table with filtered data
+    data3 <- diff_data()
+    output$volcano <- renderPlot({
+      volc_plot(data3, input$x_var, input$y_var, input$slider_value, input$color1, input$color2)
+    })
+    output$v_table <- renderDataTable({
+      volc_table(data3, input$slider_value)
+    }, options = list(scrollX = TRUE))
+  })
+  
+  
   output$density_plot <- renderPlot({
     plots <- density_plots(data_summary())
     if (!is.null(plots)) {
@@ -295,14 +407,14 @@ output$viewall<- renderDataTable({
 data_summary()
 }, options = list(scrollX = TRUE))
 
-
 }
 #Render the whole thing
 shinyApp(
-  ui = dashboardPage(
+  ui = fluidPage(theme=shinytheme("slate") ,
+                 dashboardPage(
     dashboardHeader(title = "Rshiny Project BF591"),
     sidebar,
     body
-  ),
+  )),
   server = server
 )
