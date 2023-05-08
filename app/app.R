@@ -4,6 +4,7 @@ library(tidyverse)
 library(scales)
 library(gplots)
 library(RColorBrewer)
+
 #defining the layout and sidebars
 sidebar <- dashboardSidebar(
   sidebarMenu(
@@ -46,6 +47,7 @@ body <- dashboardBody(
 )
 
 
+
 #defining server side functions
 server <- function(input, output) {
   options(shiny.maxRequestSize = 30*1024^2)
@@ -55,9 +57,10 @@ server <- function(input, output) {
     if (is.null(input$file1)) {
       return(NULL)
     } else {
-      read.csv(input$file1$datapath, header = TRUE)
+      read_csv(input$file1$datapath)
     }
   })
+  
   
   # Define data_counts reactive function to read counts file
   data_counts <- reactive({
@@ -67,6 +70,19 @@ server <- function(input, output) {
       read_csv(input$file2$datapath, col_names = TRUE,)
     }
   })
+  
+  
+  #Define summary tab for the meta data
+  meta_summary <- function(data) {
+      col_types <- sapply(data, class)
+      col_means <- sapply(data, mean, na.rm = TRUE)
+      col_sds <- sapply(data, sd, na.rm = TRUE)
+      summ_tib <- tibble("Columns" = names(data), "Type" = col_types, 
+                         "Mean" = col_means, "SD(+/-)" = col_sds)
+      return(summ_tib)
+    }
+  
+  
   
   # Define summary_data function to process counts data
   summary_data <- function(data_counts, gvar, nz_genes) {
@@ -86,16 +102,15 @@ server <- function(input, output) {
   }
   
   
-  
   # Render the data tabs UI
   output$data_tabs <- renderUI({
     if (is.null(input$file1)) {
       return(NULL)
     } else {
       tabsetPanel(
-        tabPanel("Counts"),
-        tabPanel("Sample Information"),
-        tabPanel("Plot my data")
+        tabPanel("Sample Summary", tableOutput("summary")),
+        tabPanel("View my Data", dataTableOutput("viewall")),
+        tabPanel("Plot my data", plotOutput("density_plot"))
       )
     }
   })
@@ -239,6 +254,47 @@ server <- function(input, output) {
       }
     }, options = list(lengthChange = FALSE))
   })
+  
+  density_plots <- function(data) {
+    # Get index of numeric columns
+    num_cols <- sapply(data, is.numeric)
+    num_cols <- which(num_cols)
+    
+    if (length(num_cols) == 0) {
+      return(NULL)
+    }
+    
+    # Subset data frame to numeric columns
+    data_num <- data[, num_cols]
+    
+    # Create density plots
+    plots <- list()
+    for (i in 1:length(num_cols)) {
+      plots[[i]] <- ggplot(data = data_num, aes_string(x = names(data_num)[i])) + 
+        geom_density() + 
+        theme_minimal() +
+        labs(title = names(data_num)[i])
+    }
+    return(plots)
+  }
+  
+  output$density_plot <- renderPlot({
+    plots <- density_plots(data_summary())
+    if (!is.null(plots)) {
+      grid.arrange(grobs = plots, ncol = 2)
+    }
+  })
+  
+output$summary<-renderTable(
+  {meta_summary(data_summary())
+    
+  }
+)
+
+output$viewall<- renderDataTable({
+data_summary()
+}, options = list(scrollX = TRUE))
+
 
 }
 #Render the whole thing
