@@ -10,7 +10,7 @@ library(gridExtra)
 library(glue)
 library(shinythemes)
 library(DT)
-library(beeswarm)
+library(ggbeeswarm)
 
 #defining the layout and sidebars
 sidebar <- dashboardSidebar(
@@ -18,7 +18,7 @@ sidebar <- dashboardSidebar(
     menuItem("Sample Information Exploration", tabName = "data"),
     menuItem("Counts", tabName = "counts"),
     menuItem("Differential Expression", tabName ="diffexp" ),
-    menuItem("Individual gene Viz", tabName = "ind_gene")
+    menuItem("Individual gene Analysis", tabName = "ind_gene")
   )
 )
 
@@ -34,24 +34,19 @@ body <- dashboardBody(
     
     tabItem(tabName = "counts",
             h2("Counts data analysis"),  
-            wellPanel(
-              fluidRow(
-                column(width = 7,
-                       box(
-                         title = "Upload CSV file containing counts information",
-                         fileInput("file2", ""),
-                         br(),
-                         sliderInput("gvar", "Select the minimum percentile of variance desired in the genes",
-                                     min = -50, max = 100, value = 50),
-                         sliderInput("nz", "Select the minimum number of nonzero samples",
-                                     min = 0, max = 100, value = 50),
-                         actionButton("submit_btn", "Submit")
-                       )
-                )
-              ),
+            fluidPage(sidebarPanel(
+              fileInput("file2", "Upload CSV file containing counts information"),
+              sliderInput("gvar", "Select the minimum percentile of variance desired in the genes",
+                          min = -50, max = 100, value = 50),
+              sliderInput("nz", "Select the minimum number of nonzero samples",
+                          min = 0, max = 100, value = 50),
+              actionButton("submit_btn", "Submit")
+            ),
+            mainPanel(
               uiOutput("counts_tabs")
-            )
-    ),
+            ))
+    )
+    ,
     tabItem(tabName = "diffexp", 
             sidebarLayout(
               sidebarPanel(
@@ -63,38 +58,34 @@ body <- dashboardBody(
                 colourInput(inputId = "color2", "Highlight point color", value = "springgreen", showColour = c("both", "text", "background"), 
                             palette = c("square", "limited"), allowedCols = NULL, allowTransparent = FALSE, returnName = FALSE, closeOnClick = FALSE),
                 sliderInput(inputId = "slider_value", "Select the magnitude of the p adjusted coloring:", min = -100, max = 0, value = -50),
-                actionButton("plot1", "Submit")
+                actionButton("plot", "Submit")
               ),
               mainPanel(
                 h3("Differential Expression Analysis"),
                 p("Load differential expression analysis results for visualization.")
               )
             ),uiOutput("diff_exp")
-    ),tabItem(tabName = "ind_gene",
-              fluidPage(
-                titlePanel("Individual Gene Expression Visualization"),
-                p("On this page you can visualize data about each gene individually."),
-                sidebarLayout(
-                  sidebarPanel(
-                    fileInput(inputId = 'file5', label = 'Load normalized counts matrix CSV'),
-                    fileInput(inputId = 'file4', label = 'Load sample information matrix CSV'),
-                    uiOutput("meta_selector"),
-                    #insert gene search box here
-                    textInput("gene", label = "Enter gene to search for", placeholder = "ENSG00000000419.8
-"),
-                    selectInput("plottype", label = "Choose what type of plot to make", choices = c("Bar", "Violin", "Beeswarm")),
-                    submitButton(text='Plot !')
-                  ),
-                  mainPanel(
-                    plotOutput("v_plots")
-                  )
-                )
+    ),
+    
+    tabItem(tabName = "ind_gene",
+            sidebarLayout(
+              sidebarPanel(fileInput(inputId = 'counts_id', label = 'Load normalized counts matrix CSV'),
+                           fileInput(inputId = 'meta_id', label = 'Load sample information matrix CSV'),
+                           uiOutput("meta_selector"),
+                           #insert gene search box here
+                           textInput("gene", label = "Enter gene to search for", placeholder = "ENSG00000000003.10"),
+                           selectInput("plotType", label = "Choose what type of plot to make", choices = c("Bar", "Violin", "Beeswarm")),
+                           actionBttn("go", "Submit")
+              ),
+              mainPanel(
+                plotOutput("various_plot")
+                
               )
-    )
-    
-    )
-    
-    )
+            )
+            
+    ))
+  
+)
 
 
 
@@ -110,7 +101,7 @@ server <- function(input, output) {
       read_csv(input$file1$datapath)
     }
   })
-
+  
   # Define data_counts reactive function to read counts file
   data_counts <- reactive({
     if (is.null(input$file2)) {
@@ -147,13 +138,13 @@ server <- function(input, output) {
   
   #Define summary tab for the meta data
   meta_summary <- function(data) {
-      col_types <- sapply(data, class)
-      col_means <- sapply(data, mean, na.rm = TRUE)
-      col_sds <- sapply(data, sd, na.rm = TRUE)
-      summ_tib <- tibble("Columns" = names(data), "Type" = col_types, 
-                         "Mean" = col_means, "SD(+/-)" = col_sds)
-      return(summ_tib)
-    }
+    col_types <- sapply(data, class)
+    col_means <- sapply(data, mean, na.rm = TRUE)
+    col_sds <- sapply(data, sd, na.rm = TRUE)
+    summ_tib <- tibble("Columns" = names(data), "Type" = col_types, 
+                       "Mean" = col_means, "SD(+/-)" = col_sds)
+    return(summ_tib)
+  }
   
   
   
@@ -161,16 +152,16 @@ server <- function(input, output) {
   summary_data <- function(data_counts, gvar, nz_genes) {
     # Filter genes based on variance and number of non-zero samples
     genes_var_filtered <- data_counts[rowSums(data_counts > 0) >= nz_genes & apply(data_counts, 1, var) >= gvar, ]
-
+    
     # Get summary statistics for the filtered data
     num_rows_filtered <- nrow(genes_var_filtered)
     num_rows_not_filtered <- nrow(data_counts) - num_rows_filtered
     pgene <- percent((num_rows_filtered / nrow(data_counts)))
     fgene <- percent((num_rows_not_filtered) / nrow(data_counts))
-
+    
     # Create summary data frame
     summary_df <- data.frame(Description = c("Number of Genes", "Number of Samples", "Number of Genes (Filtered):", "% of genes filtered", "Number of Genes not filtered:", "%genes not filtered:"), Value = c(nrow(data_counts), ncol(data_counts), num_rows_filtered, pgene, num_rows_not_filtered, fgene))
-
+    
     return(summary_df)
   }
   # summary_data <- function(data_counts, perc_var, nz_genes) {
@@ -217,8 +208,8 @@ server <- function(input, output) {
         tabPanel("Heatmap", plotOutput("heatmap_plot")),
         tabPanel("PCA" ,selectInput(inputId = "comp1", label="Select X-axis", choices = c("PC1", "PC2", "PC3", "PC4", "PC5", "PC5", "PC6", "PC7", "PC8", "PC9", "PC10"),selected="PC1"),
                  selectInput(inputId = "comp2", label="Select Y-axis", choices = c("PC1", "PC2", "PC3", "PC4", "PC5", "PC5", "PC6", "PC7", "PC8", "PC9", "PC10"), selected = "PC2")
-                , plotOutput("plot_pca"))
-        )
+                 , plotOutput("plot_pca"))
+      )
     }
   })
   
@@ -236,8 +227,8 @@ server <- function(input, output) {
   output$median_plot<- renderPlot({
     if (!is.null(data_counts())) {
       plot_tib <- data_counts()
-        plot_tib<-plot_tib%>%mutate(Median = apply(plot_tib[-1], MARGIN = 1, FUN = median), 
-               Variance = apply(plot_tib[-1], MARGIN = 1, FUN = var))
+      plot_tib<-plot_tib%>%mutate(Median = apply(plot_tib[-1], MARGIN = 1, FUN = median), 
+                                  Variance = apply(plot_tib[-1], MARGIN = 1, FUN = var))
       perc_val <- quantile(plot_tib$Variance, probs = input$gvar/100)   #calculate percentile
       plot_tib <- plot_tib %>% mutate(thresh = case_when(Variance >= perc_val ~ "TRUE", TRUE ~ "FALSE")) #sort genes by percentile
       #plot scatter plot
@@ -251,7 +242,7 @@ server <- function(input, output) {
         theme_bw()+
         theme(legend.position = 'bottom')
       return(scatter)}})
-
+  
   output$numzero <- renderPlot({
     if (!is.null(data_counts())) {
       data <- data_counts()
@@ -281,7 +272,7 @@ server <- function(input, output) {
     }
   })
   
-
+  
   # Define the output plot
   output$heatmap_plot <- renderPlot({
     
@@ -380,13 +371,13 @@ server <- function(input, output) {
     # Create density plots
     plots <- list()
     for (i in 1:length(num_cols)) {
-      plots[[i]] <- ggplot(data = data_num, aes_string(x = names(data_num)[i])) + 
-        geom_density() + 
-        theme_minimal() +
-        labs(title = names(data_num)[i])
+      plots[[i]] <- ggplot(data = data_num, aes_string(x = paste0("`", names(data_num)[i], "`"))) + 
+        geom_density() +
+        theme_grey() +
+        # labs(title = names(data_num)[i])
+        labs(title = paste0("`", names(data_num)[i], "`"))
     }
-    return(plots)
-  }
+    return(plots)}
   
   
   
@@ -418,7 +409,7 @@ server <- function(input, output) {
     return(new_df)
   }
   output$deg_table <- renderDataTable({
-  diff_data()
+    diff_data()
   }, options = list(scrollX = TRUE))
   
   # Add observeEvent for submit button
@@ -441,65 +432,71 @@ server <- function(input, output) {
     }
   })
   
-output$summary<-renderTable(
-  {meta_summary(data_summary())
+  output$summary<-renderTable(
+    {meta_summary(data_summary())
+      
+    }
+  )
+  
+  output$viewall<- renderDataTable({
+    data_summary()
+  }, options = list(scrollX = TRUE))
+  
+  
+  ######4th tab
+  
+  # function to load normalized counts input file
+  load_counts <- reactive({
+    req(input$counts_id)
+    read_csv(input$counts_id$datapath)
+  })
+  
+  # function to load sample information input file
+  load_meta <- reactive({
+    req(input$meta_id)
+    read_csv(input$meta_id$datapath)
+  })
+  
+  # function to dynamically generate categorical variable options
+  output$meta_selector <- renderUI({
+    meta <- load_meta()
+    if (!is.null(meta)) {
+      cat_vars <- names(meta)[sapply(meta, is.numeric)]
+      selectInput("metachoice", "Select categorical variable:", choices = cat_vars)
+    }
+  })
+  # function to make distribution plots
+  various_plots <- function(counts_tib, meta_tib, meta_cat, select_gene, plot_type) {
+    counts_tib <- column_to_rownames(counts_tib, var = "gene")
+    gene_counts <- as.numeric(as.vector(counts_tib[select_gene, ]))
+    plot_tib <- tibble(Gene_Counts = gene_counts, meta_value = meta_tib[[meta_cat]])
     
-  }
-)
-
-output$viewall<- renderDataTable({
-data_summary()
-}, options = list(scrollX = TRUE))
-
-
-######4th tab
-
-# function to dynamically generate categorical variable options
-output$meta_selector <- renderUI({
-  meta <- data_sum()
-  if (!is.null(meta)) {
-    cat_vars <- names(meta)[sapply(meta, is.numeric)]
-    selectInput("metachoice", "Select categorical variable:", choices = cat_vars)
-  }
-})
-
-# function to dynamically generate plot type options
-output$plotTypeSelector <- renderUI({
-  selectInput("plotType", "Select plot type:", choices = c("Beeswarm", "Violin", "Bar"))
-})
-
-# function to make distribution plots
-various_plots <- function(counts_tib, meta_tib, meta_cat, select_gene, plot_type) {
-  print(meta_cat)
-  counts_tib <- column_to_rownames(counts_tib, var = "gene")
-  gene_counts <- as.numeric(as.vector(counts_tib[select_gene, ]))
-  plot_tib <- tibble(Gene_Counts = gene_counts, meta_value = meta_tib[[meta_cat]])
-  
-  if (plot_type == "Beeswarm") {
-    plot <- ggplot(plot_tib, aes(x = meta_value, y = Gene_Counts)) +
-      geom_beeswarm() +
-      theme_bw() +
-      labs(title = str_c("Plot of gene counts vs ", meta_cat))
-  } else if (plot_type == "Violin") {
-    plot <- ggplot(plot_tib, aes(x = meta_value, y = Gene_Counts)) +
-      geom_violin() +
-      theme_bw() +
-      labs(title = str_c("Plot of gene counts vs ", meta_cat))
-  } else if (plot_type == "Bar") {
-    plot <- ggplot(plot_tib, aes(x = meta_value)) +
-      geom_bar() +
-      theme_bw() +
-      labs(title = str_c("Plot of gene counts vs ", meta_cat))
+    if (plot_type == "Beeswarm") {
+      plot <- ggplot(plot_tib, aes(x = meta_value, y = Gene_Counts)) +
+        geom_beeswarm() +
+        theme_bw() +
+        labs(title = str_c("Plot of gene counts vs ", meta_cat))
+    } else if (plot_type == "Violin") {
+      plot <- ggplot(plot_tib, aes(x = meta_value, y = Gene_Counts)) +
+        geom_violin() +
+        theme_bw() +
+        labs(title = str_c("Plot of gene counts vs ", meta_cat))
+    } else if (plot_type == "Bar") {
+      plot <- ggplot(plot_tib, aes(x = meta_value)) +
+        geom_bar() +
+        theme_bw() +
+        labs(title = str_c("Plot of gene counts vs ", meta_cat))
+    }
+    
+    return(plot)
   }
   
-  return(plot)
-}
-
-# methods to return outputs
-output$v_plots <- renderPlot({
-  various_plots(data_ct(), data_sum(), input$metachoice, input$gene, input$plotType)
-})
-
+  # methods to return outputs
+  observeEvent(input$go, {
+    output$various_plot <- renderPlot({
+      various_plots(load_counts(), load_meta(), input$metachoice, input$gene, input$plotType)
+    })
+  })
 }
 #Render the whole thing
 shinyApp(
