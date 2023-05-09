@@ -413,7 +413,7 @@ server <- function(input, output) {
   }, options = list(scrollX = TRUE))
   
   # Add observeEvent for submit button
-  observeEvent(input$plot1, {
+  observeEvent(input$plot, {
     # Generate plot and table with filtered data
     data3 <- diff_data()
     output$volcano <- renderPlot({
