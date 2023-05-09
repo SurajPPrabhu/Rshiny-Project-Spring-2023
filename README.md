@@ -18,3 +18,7 @@ To use the app, users can download the `app.R` file and run it in RStudio.
 ## Acknowledgements
 
 This app was developed as a final project for BF591 at Boston University, taught by Dr. Adam
+
+## Contents
+- app- contains the app.r.
+- Data- Contains the data used to test and build this app.
