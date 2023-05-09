@@ -160,7 +160,7 @@ server <- function(input, output) {
     fgene <- percent((num_rows_not_filtered) / nrow(data_counts))
     
     # Create summary data frame
-    summary_df <- data.frame(Description = c("Number of Genes", "Number of Samples", "Number of Genes (Filtered):", "% of genes filtered", "Number of Genes not filtered:", "%genes not filtered:"), Value = c(nrow(data_counts), ncol(data_counts), num_rows_filtered, pgene, num_rows_not_filtered, fgene))
+    summary_df <- data.frame(Description = c("Number of Genes", "Number of Samples", "Number of Genes (Filtered):", "% of genes filtered", "Number of Genes not filtered:", "%genes not filtered:"), Value = c(nrow(data_counts), ncol(data_counts)-1, num_rows_filtered, pgene, num_rows_not_filtered, fgene))
     
     return(summary_df)
   }
