@@ -37,7 +37,7 @@ body <- dashboardBody(
             fluidPage(sidebarPanel(
               fileInput("file2", "Upload CSV file containing counts information"),
               sliderInput("gvar", "Select the minimum percentile of variance desired in the genes",
-                          min = -50, max = 100, value = 50),
+                          min = 0, max = 100, value = 50),
               sliderInput("nz", "Select the minimum number of nonzero samples",
                           min = 0, max = 100, value = 50),
               actionButton("submit_btn", "Submit")
@@ -164,25 +164,6 @@ server <- function(input, output) {
     
     return(summary_df)
   }
-  # summary_data <- function(data_counts, perc_var, nz_genes) {
-  #   # Calculate variance percentile threshold
-  #   var_threshold <- quantile(apply(data_counts, 1, var, na.rm='TRUE'), probs = perc_var/100)
-  #   
-  #   # Filter genes based on variance and number of non-zero samples
-  #   genes_var_filtered <- data_counts[rowSums(data_counts > 0) >= nz_genes & apply(data_counts, 1, var) >= var_threshold, ]
-  #   
-  #   # Get summary statistics for the filtered data
-  #   num_rows_filtered <- nrow(genes_var_filtered)
-  #   num_rows_not_filtered <- nrow(data_counts) - num_rows_filtered
-  #   pgene <- percent((num_rows_filtered / nrow(data_counts)))
-  #   fgene <- percent((num_rows_not_filtered) / nrow(data_counts))
-  #   
-  #   # Create summary data frame
-  #   summary_df <- data.frame(Description = c("Number of Genes", "Number of Samples", "Number of Genes (Filtered):", "% of genes filtered", "Number of Genes not filtered:", "%genes not filtered:"), Value = c(nrow(data_counts), ncol(data_counts)-1, num_rows_filtered, pgene, num_rows_not_filtered, fgene))
-  #   
-  #   return(summary_df)
-  # } 
-  
   
   # Render the data tabs UI
   output$data_tabs <- renderUI({
@@ -205,7 +186,7 @@ server <- function(input, output) {
       tabsetPanel(
         tabPanel("Counts Summary", dataTableOutput("summary_data")),
         tabPanel("Counts Diagnostic Plots", plotOutput("median_plot"), plotOutput("numzero")),
-        tabPanel("Heatmap", plotOutput("heatmap_plot")),
+        tabPanel("Heatmap",tags$h2("Please wait while the heatmap loads..."), plotOutput("heatmap_plot")),
         tabPanel("PCA" ,selectInput(inputId = "comp1", label="Select X-axis", choices = c("PC1", "PC2", "PC3", "PC4", "PC5", "PC5", "PC6", "PC7", "PC8", "PC9", "PC10"),selected="PC1"),
                  selectInput(inputId = "comp2", label="Select Y-axis", choices = c("PC1", "PC2", "PC3", "PC4", "PC5", "PC5", "PC6", "PC7", "PC8", "PC9", "PC10"), selected = "PC2")
                  , plotOutput("plot_pca"))
